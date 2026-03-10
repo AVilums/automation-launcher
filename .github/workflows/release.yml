@@ -1,0 +1,94 @@
+name: Build and Release
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+    tags:
+      - "v*"
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Run tests
+        run: cargo test --all
+
+      - name: Build release binaries
+        run: cargo build --release
+
+      - name: Prepare artifacts
+        run: |
+          mkdir dist
+          copy target\release\bootstrap.exe dist\
+          copy target\release\launcher.exe dist\
+
+      - name: Create zip package
+        run: |
+          Compress-Archive -Path dist\launcher.exe -DestinationPath dist\launcher-windows-x64.zip
+
+      - name: Generate SHA256 checksums
+        run: |
+          cd dist
+          certutil -hashfile bootstrap.exe SHA256 > bootstrap.sha256
+          certutil -hashfile launcher.exe SHA256 > launcher.sha256
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: launcher-build
+          path: dist/*
+
+  release:
+
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    runs-on: windows-latest
+
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: launcher-build
+          path: dist
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/bootstrap.exe
+            dist/launcher.exe
+            dist/launcher-windows-x64.zip
+            dist/bootstrap.sha256
+            dist/launcher.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
