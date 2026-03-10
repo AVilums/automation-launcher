@@ -1,0 +1,53 @@
+{
+  "artifacts": [
+    {
+      "name": "data-processor",
+      "description": "Automated data processing tool for CSV/Excel files",
+      "tags": ["data", "csv", "automation"],
+      "versions": [
+        {
+          "version": "1.2.0",
+          "download_url": "https://github.com/your-org/automation-tools/releases/download/v1.2.0/data-processor.zip",
+          "file_size": 5242880,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "launch": {
+            "executable": "data-processor.exe",
+            "args": ["--config", "default.json"],
+            "env": {
+              "LOG_LEVEL": "info"
+            }
+          }
+        },
+        {
+          "version": "1.1.0",
+          "download_url": "https://github.com/your-org/automation-tools/releases/download/v1.1.0/data-processor.zip",
+          "file_size": 4980736,
+          "sha256": "abc123def456789abcdef0123456789abcdef0123456789abcdef0123456789a",
+          "launch": {
+            "executable": "data-processor.exe",
+            "args": null,
+            "env": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "report-generator",
+      "description": "Weekly report automation tool",
+      "tags": ["reports", "automation", "email"],
+      "versions": [
+        {
+          "version": "2.0.0",
+          "download_url": "https://github.com/your-org/automation-tools/releases/download/v2.0.0/report-generator.zip",
+          "file_size": 3145728,
+          "sha256": "def456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef01",
+          "launch": {
+            "executable": "report-generator.exe",
+            "args": null,
+            "env": null
+          }
+        }
+      ]
+    }
+  ]
+}

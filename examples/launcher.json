@@ -1,0 +1,19 @@
+{
+  "base_dir": "C:\\Users\\YourUser\\AppData\\Roaming\\AutomationLauncher",
+  "provider": {
+    "type": "github",
+    "owner": "your-org",
+    "repo": "automation-tools"
+  },
+  "auth": {
+    "type": "none"
+  },
+  "cache": {
+    "max_size_mb": 500
+  },
+  "telemetry": {
+    "enabled": true,
+    "remote_endpoint": null
+  },
+  "offline_mode": false
+}

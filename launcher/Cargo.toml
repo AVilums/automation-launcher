@@ -1,0 +1,36 @@
+[package]
+name = "launcher"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+tokio = { workspace = true }
+reqwest = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tracing-appender = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+dirs = { workspace = true }
+futures-util = { workspace = true }
+clap = { workspace = true }
+zip = { workspace = true }
+
+[features]
+default = []
+gui = ["dep:eframe", "dep:egui"]
+
+[dependencies.eframe]
+workspace = true
+optional = true
+
+[dependencies.egui]
+workspace = true
+optional = true
+
+[dev-dependencies]
+tempfile = { workspace = true }
