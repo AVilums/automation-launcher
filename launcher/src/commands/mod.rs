@@ -34,7 +34,11 @@ pub(crate) async fn fetch_manifest(config: &LauncherConfig) -> Result<ArtifactMa
 
     let manifest = match &config.provider {
         ProviderConfig::GitHub { owner, repo } => {
-            let provider = GitHubProvider::new(owner.clone(), repo.clone());
+            let token = match &config.auth {
+                crate::config::AuthConfig::ApiKey { key } => Some(key.clone()),
+                _ => None,
+            };
+            let provider = GitHubProvider::new(owner.clone(), repo.clone(), token);
             provider.fetch_manifest().await?
         }
         ProviderConfig::Http { base_url } => {

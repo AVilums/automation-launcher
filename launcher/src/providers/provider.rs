@@ -68,14 +68,16 @@ struct GitHubAsset {
 pub struct GitHubProvider {
     pub owner: String,
     pub repo: String,
+    token: Option<String>,
     client: reqwest::Client,
 }
 
 impl GitHubProvider {
-    pub fn new(owner: String, repo: String) -> Self {
+    pub fn new(owner: String, repo: String, token: Option<String>) -> Self {
         Self {
             owner,
             repo,
+            token,
             client: reqwest::Client::builder()
                 .user_agent("AutomationLauncher/0.1")
                 .build()
@@ -90,7 +92,11 @@ impl GitHubProvider {
             "https://raw.githubusercontent.com/{}/{}/main/manifest.json",
             self.owner, self.repo
         );
-        let resp = self.client.get(&url).send().await.ok()?;
+        let mut builder = self.client.get(&url);
+        if let Some(token) = &self.token {
+            builder = builder.bearer_auth(token);
+        }
+        let resp = builder.send().await.ok()?;
         if !resp.status().is_success() {
             return None;
         }
@@ -105,7 +111,11 @@ impl GitHubProvider {
         );
         info!("Fetching GitHub releases from {}", url);
 
-        let response = self.client.get(&url).send().await?;
+        let mut builder = self.client.get(&url);
+        if let Some(token) = &self.token {
+            builder = builder.bearer_auth(token);
+        }
+        let response = builder.send().await?;
         if !response.status().is_success() {
             return Err(LauncherError::Provider(format!(
                 "GitHub API returned {}",

@@ -100,10 +100,13 @@ impl LauncherConfig {
     fn default_config(base_dir: PathBuf) -> Self {
         Self {
             base_dir,
-            provider: ProviderConfig::Http {
-                base_url: "https://localhost/artifacts".into(),
+            provider: ProviderConfig::GitHub {
+                owner: "org-on-auto".into(),
+                repo: "automations".into(),
             },
-            auth: AuthConfig::None,
+            auth: AuthConfig::ApiKey {
+                key: "".into(),
+            },
             cache: CacheConfig { max_size_mb: 500 },
             telemetry: TelemetryConfig {
                 enabled: true,
