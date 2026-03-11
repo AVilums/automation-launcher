@@ -3,7 +3,7 @@ mod config;
 pub(crate) mod download;
 mod fav;
 mod list;
-mod run;
+pub(crate) mod run;
 mod search;
 
 pub use cache::cmd_cache;
@@ -19,7 +19,7 @@ use crate::config::{LauncherConfig, ProviderConfig};
 use crate::error::LauncherError;
 use crate::providers::{GitHubProvider, HttpProvider, ArtifactProvider};
 
-pub(crate) async fn fetch_manifest(config: &LauncherConfig) -> Result<ArtifactManifest, LauncherError> {
+pub async fn fetch_manifest(config: &LauncherConfig) -> Result<ArtifactManifest, LauncherError> {
     if config.offline_mode {
         let manifest_path = config.metadata_dir().join("manifest.json");
         if manifest_path.exists() {
@@ -56,14 +56,4 @@ pub(crate) async fn fetch_manifest(config: &LauncherConfig) -> Result<ArtifactMa
     Ok(manifest)
 }
 
-fn format_bytes(bytes: u64) -> String {
-    if bytes >= 1024 * 1024 * 1024 {
-        format!("{:.1} GB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
-    } else if bytes >= 1024 * 1024 {
-        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
-    } else if bytes >= 1024 {
-        format!("{:.1} KB", bytes as f64 / 1024.0)
-    } else {
-        format!("{} B", bytes)
-    }
-}
+use crate::util::format_bytes;

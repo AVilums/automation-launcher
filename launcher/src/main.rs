@@ -8,6 +8,7 @@ mod gui;
 mod providers;
 mod services;
 mod telemetry;
+mod util;
 
 use clap::Parser;
 use tracing::{error, info};
@@ -38,7 +39,10 @@ async fn run(cli: Cli) -> Result<(), LauncherError> {
         config.offline_mode = true;
     }
 
-    // GUI mode — skip logging init (egui manages its own loop)
+    init_logging(&config)?;
+    info!("Automation Launcher starting");
+
+    // GUI mode
     #[cfg(feature = "gui")]
     if matches!(cli.command, Some(Commands::Gui)) || cli.command.is_none() {
         let rt = tokio::runtime::Handle::current();
@@ -46,9 +50,6 @@ async fn run(cli: Cli) -> Result<(), LauncherError> {
         gui::run_gui(cfg, rt).map_err(|e| LauncherError::Config(e))?;
         return Ok(());
     }
-
-    init_logging(&config)?;
-    info!("Automation Launcher starting");
 
     let telemetry = TelemetryManager::new(config.logs_dir(), config.telemetry.enabled)
         .with_remote(config.telemetry.remote_endpoint.clone());

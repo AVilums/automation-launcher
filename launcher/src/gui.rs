@@ -1,20 +1,21 @@
 use eframe::egui;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use crate::artifact::{Artifact, ArtifactManifest};
-use crate::services::cache::{CacheEntry, CacheManager};
+use crate::commands;
 use crate::config::LauncherConfig;
+use crate::services::cache::{CacheEntry, CacheManager};
 use crate::services::favorites::Favorites;
+use crate::util::format_bytes;
 
-/// Messages sent from background tasks to the GUI.
 enum BgMessage {
     ManifestLoaded(ArtifactManifest),
     Error(String),
     DownloadComplete(String, String),
 }
 
-/// Shared state between the GUI and background tasks.
 struct SharedState {
     messages: Vec<BgMessage>,
 }
@@ -39,17 +40,14 @@ pub struct LauncherApp {
     shared: Arc<Mutex<SharedState>>,
     runtime: tokio::runtime::Handle,
     loading: bool,
-    // Settings fields
+    running_processes: HashMap<String, u32>,
     settings_cache_mb: String,
     settings_telemetry: bool,
     settings_offline: bool,
 }
 
 impl LauncherApp {
-    pub fn new(
-        config: LauncherConfig,
-        runtime: tokio::runtime::Handle,
-    ) -> Self {
+    pub fn new(config: LauncherConfig, runtime: tokio::runtime::Handle) -> Self {
         let favorites_path = Favorites::file_path(&config.base_dir);
         let favorites = Favorites::load(&favorites_path).unwrap_or_default();
 
@@ -75,6 +73,7 @@ impl LauncherApp {
             })),
             runtime,
             loading: false,
+            running_processes: HashMap::new(),
             settings_cache_mb,
             settings_telemetry,
             settings_offline,
@@ -82,16 +81,17 @@ impl LauncherApp {
     }
 
     fn refresh_manifest(&mut self) {
-        if self.loading || self.config.offline_mode {
-            if self.config.offline_mode {
-                // Try loading cached manifest
-                let path = self.config.metadata_dir().join("manifest.json");
-                if path.exists() {
-                    if let Ok(content) = std::fs::read_to_string(&path) {
-                        if let Ok(m) = serde_json::from_str::<ArtifactManifest>(&content) {
-                            self.manifest = Some(m);
-                            self.status_message = "Loaded cached manifest (offline)".into();
-                        }
+        if self.loading {
+            return;
+        }
+
+        if self.config.offline_mode {
+            let path = self.config.metadata_dir().join("manifest.json");
+            if path.exists() {
+                if let Ok(content) = std::fs::read_to_string(&path) {
+                    if let Ok(m) = serde_json::from_str::<ArtifactManifest>(&content) {
+                        self.manifest = Some(m);
+                        self.status_message = "Loaded cached manifest (offline)".into();
                     }
                 }
             }
@@ -105,7 +105,7 @@ impl LauncherApp {
         let config = self.config.clone();
 
         self.runtime.spawn(async move {
-            let result = fetch_manifest_async(&config).await;
+            let result = commands::fetch_manifest(&config).await;
             if let Ok(mut state) = shared.lock() {
                 match result {
                     Ok(manifest) => state.messages.push(BgMessage::ManifestLoaded(manifest)),
@@ -116,8 +116,12 @@ impl LauncherApp {
     }
 
     fn trigger_download(&mut self, tool_name: &str, version: &str) {
-        self.status_message = format!("Downloading {} v{}...", tool_name, version);
+        if self.loading {
+            return;
+        }
+
         self.loading = true;
+        self.status_message = format!("Downloading {} v{}...", tool_name, version);
 
         let shared = self.shared.clone();
         let config = self.config.clone();
@@ -125,12 +129,35 @@ impl LauncherApp {
         let ver = version.to_string();
 
         self.runtime.spawn(async move {
-            let result = download_async(&config, &name, &ver).await;
+            let manifest = match commands::fetch_manifest(&config).await {
+                Ok(m) => m,
+                Err(e) => {
+                    if let Ok(mut state) = shared.lock() {
+                        state.messages.push(BgMessage::Error(e.to_string()));
+                    }
+                    return;
+                }
+            };
+
+            let result = match manifest.find_artifact(&name) {
+                Some(artifact) => match artifact.find_version(&ver) {
+                    Some(av) => {
+                        commands::download::download_and_cache(
+                            &config, &name, &ver, &av.download_url, &av.sha256,
+                        )
+                        .await
+                    }
+                    None => Err(crate::error::LauncherError::VersionNotFound {
+                        tool: name.clone(),
+                        version: ver.clone(),
+                    }),
+                },
+                None => Err(crate::error::LauncherError::ArtifactNotFound(name.clone())),
+            };
+
             if let Ok(mut state) = shared.lock() {
                 match result {
-                    Ok(()) => state
-                        .messages
-                        .push(BgMessage::DownloadComplete(name, ver)),
+                    Ok(()) => state.messages.push(BgMessage::DownloadComplete(name, ver)),
                     Err(e) => state.messages.push(BgMessage::Error(e.to_string())),
                 }
             }
@@ -144,26 +171,32 @@ impl LauncherApp {
         if let Some(cached_path) = cache.get_cached_path(tool_name, version) {
             let _ = cache.touch(tool_name, version);
 
-            let executable_path = cached_path
-                .parent()
-                .unwrap_or(&cached_path)
-                .join(cached_path.file_name().unwrap_or_default());
+            let launch_config = match commands::run::build_launch_config(
+                tool_name, version, &cached_path, &[],
+            ) {
+                Ok(lc) => lc,
+                Err(e) => {
+                    self.status_message = format!("Failed to run: {}", e);
+                    return;
+                }
+            };
 
-            let launch_config = crate::artifact::LaunchConfig {
-                executable: cached_path
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .to_string(),
-                args: None,
-                env: None,
+            let executable_path = match commands::run::resolve_executable(
+                &cached_path, &launch_config, tool_name,
+            ) {
+                Ok(p) => p,
+                Err(e) => {
+                    self.status_message = format!("Failed to run: {}", e);
+                    return;
+                }
             };
 
             let exec = crate::services::execution::ExecutionManager::new();
             match exec.execute(&executable_path, &launch_config) {
                 Ok(result) => {
-                    self.status_message =
-                        format!("Started {} v{} (PID {})", tool_name, version, result.pid);
+                    let key = format!("{} v{}", tool_name, version);
+                    self.running_processes.insert(key.clone(), result.pid);
+                    self.status_message = format!("Started {} (PID {})", key, result.pid);
                 }
                 Err(e) => {
                     self.status_message = format!("Failed to run: {}", e);
@@ -172,6 +205,28 @@ impl LauncherApp {
         } else {
             self.status_message = format!("{} v{} not cached — download first", tool_name, version);
         }
+    }
+
+    fn stop_process(&mut self, tool_name: &str, version: &str) {
+        let key = format!("{} v{}", tool_name, version);
+        if let Some(pid) = self.running_processes.remove(&key) {
+            #[cfg(windows)]
+            {
+                let _ = std::process::Command::new("taskkill")
+                    .args(["/PID", &pid.to_string(), "/F"])
+                    .output();
+            }
+            #[cfg(not(windows))]
+            {
+                unsafe { libc::kill(pid as i32, libc::SIGTERM); }
+            }
+            self.status_message = format!("Stopped {} (PID {})", key, pid);
+        }
+    }
+
+    fn is_running(&self, tool_name: &str, version: &str) -> bool {
+        let key = format!("{} v{}", tool_name, version);
+        self.running_processes.contains_key(&key)
     }
 
     fn refresh_cache(&mut self) {
@@ -192,12 +247,6 @@ impl LauncherApp {
         for msg in messages {
             match msg {
                 BgMessage::ManifestLoaded(manifest) => {
-                    // Cache manifest for offline use
-                    let metadata_dir = self.config.metadata_dir();
-                    let _ = std::fs::create_dir_all(&metadata_dir);
-                    if let Ok(json) = serde_json::to_string_pretty(&manifest) {
-                        let _ = std::fs::write(metadata_dir.join("manifest.json"), json);
-                    }
                     let count = manifest.artifacts.len();
                     self.manifest = Some(manifest);
                     self.status_message = format!("Loaded {} artifacts", count);
@@ -212,6 +261,22 @@ impl LauncherApp {
                     self.loading = false;
                     self.refresh_cache();
                 }
+            }
+        }
+    }
+
+    fn draw_run_stop_button(&mut self, ui: &mut egui::Ui, name: &str, version: &str) {
+        if self.is_running(name, version) {
+            if ui.button("⏹ Stop").clicked() {
+                let n = name.to_string();
+                let v = version.to_string();
+                self.stop_process(&n, &v);
+            }
+        } else {
+            if ui.button("▶ Run").clicked() {
+                let n = name.to_string();
+                let v = version.to_string();
+                self.trigger_run(&n, &v);
             }
         }
     }
@@ -271,11 +336,7 @@ impl LauncherApp {
                             });
 
                             if is_cached {
-                                if ui.button("▶ Run").clicked() {
-                                    let name = artifact.name.clone();
-                                    let v = ver.version.clone();
-                                    self.trigger_run(&name, &v);
-                                }
+                                self.draw_run_stop_button(ui, &artifact.name, &ver.version);
                             } else if ui.button("⬇ Download").clicked() {
                                 let name = artifact.name.clone();
                                 let v = ver.version.clone();
@@ -318,19 +379,15 @@ impl LauncherApp {
                     ui.horizontal(|ui| {
                         ui.strong(name);
 
-                        // Find latest cached version
                         let cached = self
                             .cache_entries
                             .iter()
                             .find(|e| &e.tool_name == name);
 
                         if let Some(entry) = cached {
-                            ui.label(format!("v{} (cached)", entry.version));
-                            if ui.button("▶ Run").clicked() {
-                                let n = name.clone();
-                                let v = entry.version.clone();
-                                self.trigger_run(&n, &v);
-                            }
+                            let ver = entry.version.clone();
+                            ui.label(format!("v{} (cached)", ver));
+                            self.draw_run_stop_button(ui, name, &ver);
                         } else {
                             ui.label("not cached");
                         }
@@ -368,6 +425,7 @@ impl LauncherApp {
 
         let mut to_remove: Option<(String, String)> = None;
         let mut to_run: Option<(String, String)> = None;
+        let mut to_stop: Option<(String, String)> = None;
 
         egui::ScrollArea::vertical().show(ui, |ui| {
             for entry in &self.cache_entries {
@@ -382,12 +440,20 @@ impl LauncherApp {
                     if ui.button("🗑").clicked() {
                         to_remove = Some((entry.tool_name.clone(), entry.version.clone()));
                     }
-                    if ui.button("▶ Run").clicked() {
+                    if self.is_running(&entry.tool_name, &entry.version) {
+                        if ui.button("⏹ Stop").clicked() {
+                            to_stop = Some((entry.tool_name.clone(), entry.version.clone()));
+                        }
+                    } else if ui.button("▶ Run").clicked() {
                         to_run = Some((entry.tool_name.clone(), entry.version.clone()));
                     }
                 });
             }
         });
+
+        if let Some((name, version)) = to_stop {
+            self.stop_process(&name, &version);
+        }
 
         if let Some((name, version)) = to_run {
             self.trigger_run(&name, &version);
@@ -416,7 +482,10 @@ impl LauncherApp {
 
         ui.separator();
 
-        ui.label(format!("Config file: {}", self.config.base_dir.join("config").join("launcher.json").display()));
+        ui.label(format!(
+            "Config file: {}",
+            self.config.base_dir.join("config").join("launcher.json").display()
+        ));
         ui.label(format!("Provider: {:?}", self.config.provider));
         ui.label(format!("Auth: {:?}", self.config.auth));
 
@@ -454,7 +523,6 @@ impl eframe::App for LauncherApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.process_messages();
 
-        // Request repaint while loading
         if self.loading {
             ctx.request_repaint();
         }
@@ -488,7 +556,6 @@ impl eframe::App for LauncherApp {
     }
 }
 
-/// Launch the GUI window.
 pub fn run_gui(config: LauncherConfig, runtime: tokio::runtime::Handle) -> Result<(), String> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
@@ -505,92 +572,4 @@ pub fn run_gui(config: LauncherConfig, runtime: tokio::runtime::Handle) -> Resul
         }),
     )
     .map_err(|e| e.to_string())
-}
-
-async fn fetch_manifest_async(
-    config: &LauncherConfig,
-) -> Result<ArtifactManifest, crate::error::LauncherError> {
-    use crate::config::ProviderConfig;
-    use crate::providers::{ArtifactProvider, GitHubProvider, HttpProvider};
-
-    match &config.provider {
-        ProviderConfig::GitHub { owner, repo } => {
-            let provider = GitHubProvider::new(owner.clone(), repo.clone());
-            provider.fetch_manifest().await
-        }
-        ProviderConfig::Http { base_url } => {
-            let provider = HttpProvider::new(base_url.clone());
-            provider.fetch_manifest().await
-        }
-    }
-}
-
-async fn download_async(
-    config: &LauncherConfig,
-    tool_name: &str,
-    version: &str,
-) -> Result<(), crate::error::LauncherError> {
-    use crate::providers::{ArtifactProvider, GitHubProvider, HttpProvider};
-    use crate::config::ProviderConfig;
-
-    let manifest = match &config.provider {
-        ProviderConfig::GitHub { owner, repo } => {
-            let provider = GitHubProvider::new(owner.clone(), repo.clone());
-            provider.fetch_manifest().await?
-        }
-        ProviderConfig::Http { base_url } => {
-            let provider = HttpProvider::new(base_url.clone());
-            provider.fetch_manifest().await?
-        }
-    };
-
-    let artifact = manifest
-        .find_artifact(tool_name)
-        .ok_or_else(|| crate::error::LauncherError::ArtifactNotFound(tool_name.into()))?;
-
-    let ver = artifact
-        .find_version(version)
-        .ok_or_else(|| crate::error::LauncherError::VersionNotFound {
-            tool: tool_name.into(),
-            version: version.into(),
-        })?;
-
-    let dm = crate::services::download::DownloadManager::new(config.downloads_dir());
-    let downloaded = dm.download(&ver.download_url, &ver.sha256).await?;
-
-    let cache = CacheManager::new(config.cache_dir(), config.cache.max_size_mb);
-    cache.init()?;
-
-    // If it's a zip, extract first
-    if crate::services::extract::is_zip(&downloaded) {
-        let extract_dir = config.cache_dir().join(tool_name).join(version);
-        let files = crate::services::extract::extract_zip(&downloaded, &extract_dir)?;
-        // Store the first executable found, or the first file
-        if let Some(exe) = files.iter().find(|f| {
-            f.extension()
-                .map(|e| e == "exe" || e == "ps1" || e == "bat")
-                .unwrap_or(false)
-        }) {
-            cache.store(tool_name, version, exe)?;
-        } else if let Some(first) = files.first() {
-            cache.store(tool_name, version, first)?;
-        }
-    } else {
-        cache.store(tool_name, version, &downloaded)?;
-    }
-
-    let _ = std::fs::remove_file(&downloaded);
-    Ok(())
-}
-
-fn format_bytes(bytes: u64) -> String {
-    if bytes >= 1024 * 1024 * 1024 {
-        format!("{:.1} GB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
-    } else if bytes >= 1024 * 1024 {
-        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
-    } else if bytes >= 1024 {
-        format!("{:.1} KB", bytes as f64 / 1024.0)
-    } else {
-        format!("{} B", bytes)
-    }
 }

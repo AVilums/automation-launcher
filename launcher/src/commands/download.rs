@@ -1,4 +1,4 @@
-use crate::config::LauncherConfig;
+use crate::config::{AuthConfig, LauncherConfig};
 use crate::error::LauncherError;
 use crate::services::cache::CacheManager;
 use crate::services::download::DownloadManager;
@@ -47,39 +47,54 @@ pub async fn cmd_download(
         &TelemetryEvent::new(EventType::DownloadStart).with_tool(tool_name, ver),
     )?;
 
-    let dm = DownloadManager::new(config.downloads_dir());
-    let downloaded_path = dm
-        .download(&artifact_version.download_url, &artifact_version.sha256)
-        .await?;
-
-    // Store in cache
-    let cache = CacheManager::new(config.cache_dir(), config.cache.max_size_mb);
-    cache.init()?;
-
-    // Handle zip extraction
-    if extract::is_zip(&downloaded_path) {
-        let extract_dir = config.cache_dir().join(tool_name).join(ver);
-        let files = extract::extract_zip(&downloaded_path, &extract_dir)?;
-        if let Some(exe) = files.iter().find(|f| {
-            f.extension()
-                .map(|e| e == "exe" || e == "ps1" || e == "bat")
-                .unwrap_or(false)
-        }) {
-            cache.store(tool_name, ver, exe)?;
-        } else if let Some(first) = files.first() {
-            cache.store(tool_name, ver, first)?;
-        }
-    } else {
-        cache.store(tool_name, ver, &downloaded_path)?;
-    }
-
-    // Clean up download
-    let _ = std::fs::remove_file(&downloaded_path);
+    download_and_cache(config, tool_name, ver, &artifact_version.download_url, &artifact_version.sha256).await?;
 
     telemetry.record(
         &TelemetryEvent::new(EventType::DownloadComplete).with_tool(tool_name, ver),
     )?;
 
     println!("Downloaded and cached: {} v{}", tool_name, ver);
+    Ok(())
+}
+
+pub(crate) async fn download_and_cache(
+    config: &LauncherConfig,
+    tool_name: &str,
+    version: &str,
+    download_url: &str,
+    sha256: &str,
+) -> Result<(), LauncherError> {
+    let token = match &config.auth {
+        AuthConfig::ApiKey { key } => Some(key.clone()),
+        _ => None,
+    };
+    let dm = DownloadManager::new(config.downloads_dir()).with_token(token);
+    let downloaded_path = dm.download(download_url, sha256).await?;
+
+    let cache = CacheManager::new(config.cache_dir(), config.cache.max_size_mb);
+    cache.init()?;
+
+    if extract::is_zip(&downloaded_path) {
+        let extract_dir = config.cache_dir().join(".tmp_extract").join(tool_name).join(version);
+        let files = extract::extract_zip(&downloaded_path, &extract_dir)?;
+
+        let has_runnable = files.iter().any(|f| {
+            let name = f.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
+            name == format!("{}.exe", tool_name).to_lowercase()
+                || f.extension().map(|e| e == "exe" || e == "ps1" || e == "bat").unwrap_or(false)
+        });
+
+        if has_runnable {
+            cache.store(tool_name, version, &extract_dir)?;
+        } else if let Some(first) = files.first() {
+            cache.store(tool_name, version, first)?;
+        }
+
+        let _ = std::fs::remove_dir_all(&extract_dir);
+    } else {
+        cache.store(tool_name, version, &downloaded_path)?;
+    }
+
+    let _ = std::fs::remove_file(&downloaded_path);
     Ok(())
 }

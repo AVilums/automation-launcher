@@ -60,8 +60,11 @@ struct GitHubRelease {
 /// A single asset attached to a GitHub release.
 #[derive(Debug, Deserialize)]
 struct GitHubAsset {
+    #[allow(dead_code)]
+    id: u64,
     name: String,
     size: u64,
+    url: String,
     browser_download_url: String,
 }
 
@@ -98,6 +101,11 @@ impl GitHubProvider {
         }
         let resp = builder.send().await.ok()?;
         if !resp.status().is_success() {
+            if resp.status() == reqwest::StatusCode::NOT_FOUND {
+                tracing::debug!("Manifest not found at {}: 404", url);
+            } else {
+                tracing::warn!("Failed to fetch manifest from {}: {}", url, resp.status());
+            }
             return None;
         }
         resp.json::<ArtifactManifest>().await.ok()
@@ -117,63 +125,87 @@ impl GitHubProvider {
         }
         let response = builder.send().await?;
         if !response.status().is_success() {
-            return Err(LauncherError::Provider(format!(
-                "GitHub API returned {}",
-                response.status()
-            )));
+            let status = response.status();
+            let error_msg = format!("GitHub API returned {} for {}", status, url);
+            tracing::error!("{}", error_msg);
+            return Err(LauncherError::Provider(error_msg));
         }
 
         let releases: Vec<GitHubRelease> = response.json().await?;
 
-        // Group releases into a single artifact named after the repo.
-        let versions: Vec<ArtifactVersion> = releases
-            .iter()
-            .filter_map(|rel| {
-                // Pick the first downloadable asset (zip/exe/tar.gz)
-                let asset = rel.assets.iter().find(|a| {
-                    let n = a.name.to_lowercase();
-                    n.ends_with(".zip")
-                        || n.ends_with(".exe")
-                        || n.ends_with(".tar.gz")
-                        || n.ends_with(".msi")
-                })?;
+        let mut artifacts_map: std::collections::HashMap<String, Vec<ArtifactVersion>> =
+            std::collections::HashMap::new();
+        let mut descriptions: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
 
-                let executable = if asset.name.ends_with(".exe") {
-                    asset.name.clone()
-                } else {
-                    // Assume the archive contains an exe with the repo name
-                    format!("{}.exe", self.repo)
-                };
+        for rel in releases {
+            // Pick the first downloadable asset (zip/exe/tar.gz)
+            let asset = match rel.assets.iter().find(|a| {
+                let n = a.name.to_lowercase();
+                n.ends_with(".zip")
+                    || n.ends_with(".exe")
+                    || n.ends_with(".tar.gz")
+                    || n.ends_with(".msi")
+            }) {
+                Some(a) => a,
+                None => continue,
+            };
 
-                Some(ArtifactVersion {
-                    version: rel.tag_name.trim_start_matches('v').to_string(),
-                    download_url: asset.browser_download_url.clone(),
-                    file_size: asset.size,
-                    sha256: String::new(), // GitHub doesn't provide checksums
-                    launch: LaunchConfig {
-                        executable,
-                        args: None,
-                        env: None,
-                    },
-                })
+            // Parse automation name and version from tag name (e.g., sort-folders-v1.0.8)
+            // or if it's just v1.0.8, use the repo name
+            let (name, version) = if let Some(pos) = rel.tag_name.rfind("-v") {
+                let (n, v) = rel.tag_name.split_at(pos);
+                (n.to_string(), v.trim_start_matches("-v").to_string())
+            } else {
+                (
+                    self.repo.clone(),
+                    rel.tag_name.trim_start_matches('v').to_string(),
+                )
+            };
+
+            let executable = if asset.name.ends_with(".exe") {
+                asset.name.clone()
+            } else {
+                // Use the automation name as the expected executable name
+                format!("{}.exe", name)
+            };
+
+            // If a token is provided, use the API URL for assets to support private repositories
+            let download_url = if self.token.is_some() {
+                asset.url.clone()
+            } else {
+                asset.browser_download_url.clone()
+            };
+
+            let version_data = ArtifactVersion {
+                version,
+                download_url,
+                file_size: asset.size,
+                sha256: String::new(),
+                launch: LaunchConfig {
+                    executable,
+                    args: None,
+                    env: None,
+                },
+            };
+
+            artifacts_map.entry(name.clone()).or_default().push(version_data);
+            if let Some(body) = rel.body {
+                descriptions.entry(name).or_insert(body);
+            }
+        }
+
+        let artifacts: Vec<Artifact> = artifacts_map
+            .into_iter()
+            .map(|(name, versions)| Artifact {
+                description: descriptions.get(&name).cloned().unwrap_or_default(),
+                name,
+                tags: vec!["github".into()],
+                versions,
             })
             .collect();
 
-        let description = releases
-            .first()
-            .and_then(|r| r.body.clone())
-            .unwrap_or_default();
-
-        let artifact = Artifact {
-            name: self.repo.clone(),
-            description,
-            tags: vec!["github".into()],
-            versions,
-        };
-
-        Ok(ArtifactManifest {
-            artifacts: vec![artifact],
-        })
+        Ok(ArtifactManifest { artifacts })
     }
 }
 

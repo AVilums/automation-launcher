@@ -61,14 +61,38 @@ impl CacheManager {
         let tool_dir = self.cache_dir.join(tool_name).join(version);
         std::fs::create_dir_all(&tool_dir)?;
 
+    let dest_path = if source_path.is_dir() {
+        // When storing a directory, the canonical path is the versioned directory itself
+        tool_dir.clone()
+    } else {
         let filename = source_path
             .file_name()
             .ok_or_else(|| LauncherError::Cache("Invalid source filename".into()))?;
-        let dest_path = tool_dir.join(filename);
+        tool_dir.join(filename)
+    };
 
-        std::fs::copy(source_path, &dest_path)?;
+    if source_path != dest_path {
+        if source_path.is_dir() {
+            // If it's a directory, copy its contents to tool_dir
+            for entry in std::fs::read_dir(source_path)? {
+                let entry = entry?;
+                let dest = tool_dir.join(entry.file_name());
+                if entry.path().is_dir() {
+                    copy_dir_all(&entry.path(), &dest)?;
+                } else {
+                    std::fs::copy(entry.path(), &dest)?;
+                }
+            }
+        } else {
+            std::fs::copy(source_path, &dest_path)?;
+        }
+    }
 
-        let size_bytes = std::fs::metadata(&dest_path)?.len();
+        let size_bytes = if tool_dir.exists() {
+            get_dir_size(&tool_dir).unwrap_or(0)
+        } else {
+            0
+        };
 
         let mut index = self.load_index().unwrap_or_default();
 
@@ -175,6 +199,38 @@ impl CacheManager {
         std::fs::write(&self.index_path, content)?;
         Ok(())
     }
+}
+
+fn get_dir_size(path: &Path) -> std::io::Result<u64> {
+    let mut size = 0;
+    if path.is_dir() {
+        for entry in std::fs::read_dir(path)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_dir() {
+                size += get_dir_size(&path)?;
+            } else {
+                size += entry.metadata()?.len();
+            }
+        }
+    } else {
+        size = path.metadata()?.len();
+    }
+    Ok(size)
+}
+
+fn copy_dir_all(src: &Path, dst: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let ty = entry.file_type()?;
+        if ty.is_dir() {
+            copy_dir_all(&entry.path(), &dst.join(entry.file_name()))?;
+        } else {
+            std::fs::copy(entry.path(), &dst.join(entry.file_name()))?;
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

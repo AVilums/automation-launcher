@@ -13,7 +13,7 @@ A **Windows-first application** for securely distributing, managing, and executi
 - **Caching** — LRU-based local cache with configurable size limits and offline mode support
 - **Telemetry** — Structured event logging (local files + optional remote endpoint with batching)
 - **Bootstrap Updater** — Separate bootstrap binary that auto-updates the launcher, with remote kill-switch support
-- **GUI** — Optional graphical interface built with egui/eframe (feature-gated)
+- **GUI** — Graphical interface built with egui/eframe (enabled by default)
 - **Favorites** — Pin frequently used tools for quick access
 - **CI/CD** — GitHub Actions workflow for build, test, and release
 
@@ -44,9 +44,6 @@ cargo build
 
 # Build in release mode
 cargo build --release
-
-# Build launcher with GUI support
-cargo build --release --features gui
 ```
 
 ### 3. Run tests
@@ -88,7 +85,7 @@ Commands:
   cache      Cache management commands
   config     Show or update configuration
   fav        Manage favorite tools
-  gui        Launch the graphical interface (requires --features gui)
+  gui        Launch the graphical interface
 ```
 
 ### Examples

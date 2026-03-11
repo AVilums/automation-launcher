@@ -21,7 +21,7 @@ clap = { workspace = true }
 zip = { workspace = true }
 
 [features]
-default = []
+default = ["gui"]
 gui = ["dep:eframe", "dep:egui"]
 
 [dependencies.eframe]

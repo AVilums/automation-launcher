@@ -2,6 +2,14 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct LocalArtifactManifest {
+    pub name: String,
+    pub description: String,
+    pub version: String,
+    pub entry_point: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Artifact {
     pub name: String,
     pub description: String,

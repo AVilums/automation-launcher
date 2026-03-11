@@ -26,7 +26,7 @@ pub fn init_logging(config: &LauncherConfig) -> Result<(), LauncherError> {
         )
         .with(
             fmt::layer()
-                .with_target(true)
+                .with_target(false)
                 .with_level(true)
                 .with_writer(std::io::stdout),
         );
