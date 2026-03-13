@@ -1,10 +1,8 @@
-use crate::config::LauncherConfig;
-use crate::error::LauncherError;
-
-use super::fetch_manifest;
+use config::LauncherConfig;
+use domain::LauncherError;
 
 pub async fn cmd_list(config: &LauncherConfig) -> Result<(), LauncherError> {
-    let manifest = fetch_manifest(config).await?;
+    let manifest = runtime::fetch_manifest(config).await?;
 
     if manifest.artifacts.is_empty() {
         println!("No artifacts available.");

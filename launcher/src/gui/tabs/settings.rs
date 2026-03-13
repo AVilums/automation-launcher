@@ -1,6 +1,6 @@
 use eframe::egui;
 
-use crate::config::LauncherConfig;
+use config::LauncherConfig;
 
 use super::super::LauncherApp;
 

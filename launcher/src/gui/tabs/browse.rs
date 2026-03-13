@@ -1,6 +1,6 @@
 use eframe::egui;
 
-use crate::artifact::Artifact;
+use artifact::Artifact;
 
 use super::super::LauncherApp;
 

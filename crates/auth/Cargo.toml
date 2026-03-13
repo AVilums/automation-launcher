@@ -1,0 +1,9 @@
+[package]
+name = "auth"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+domain = { path = "../domain" }
+config = { path = "../config" }
+tracing = { workspace = true }

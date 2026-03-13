@@ -1,7 +1,7 @@
 use crate::cli::FavAction;
-use crate::config::LauncherConfig;
-use crate::error::LauncherError;
-use crate::services::favorites::Favorites;
+use config::LauncherConfig;
+use domain::LauncherError;
+use storage::favorites::Favorites;
 
 pub fn cmd_fav(config: &LauncherConfig, action: FavAction) -> Result<(), LauncherError> {
     let fav_path = Favorites::file_path(&config.base_dir);
@@ -16,10 +16,7 @@ pub fn cmd_fav(config: &LauncherConfig, action: FavAction) -> Result<(), Launche
             println!("{:<25} {}", "TOOL", "PINNED VERSION");
             println!("{}", "-".repeat(40));
             for item in &favorites.items {
-                let ver = item
-                    .pinned_version
-                    .as_deref()
-                    .unwrap_or("latest");
+                let ver = item.pinned_version.as_deref().unwrap_or("latest");
                 println!("{:<25} {}", item.tool_name, ver);
             }
         }

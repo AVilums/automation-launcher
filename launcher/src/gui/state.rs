@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use crate::artifact::ArtifactManifest;
+use artifact::ArtifactManifest;
 
 pub enum BgMessage {
     ManifestLoaded(ArtifactManifest),

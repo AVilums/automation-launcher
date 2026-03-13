@@ -2,6 +2,18 @@
 members = [
     "bootstrap",
     "launcher",
+    "runner",
+    "crates/domain",
+    "crates/artifact",
+    "crates/config",
+    "crates/network",
+    "crates/auth",
+    "crates/storage",
+    "crates/telemetry",
+    "crates/provider",
+    "crates/execution",
+    "crates/runtime",
+    "crates/scheduler",
 ]
 resolver = "3"
 

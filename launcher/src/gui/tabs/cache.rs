@@ -1,7 +1,7 @@
 use eframe::egui;
 
-use crate::services::cache::CacheManager;
-use crate::util::format_bytes;
+use storage::cache::CacheManager;
+use domain::format_bytes;
 
 use super::super::LauncherApp;
 

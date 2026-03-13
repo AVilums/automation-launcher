@@ -1,0 +1,9 @@
+[package]
+name = "execution"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+domain = { path = "../domain" }
+artifact = { path = "../artifact" }
+tracing = { workspace = true }

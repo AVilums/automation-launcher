@@ -1,0 +1,14 @@
+[package]
+name = "runner"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+domain = { path = "../crates/domain" }
+config = { path = "../crates/config" }
+runtime = { path = "../crates/runtime" }
+telemetry = { path = "../crates/telemetry" }
+scheduler = { path = "../crates/scheduler" }
+tokio = { workspace = true }
+tracing = { workspace = true }
+clap = { workspace = true }

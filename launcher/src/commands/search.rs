@@ -1,10 +1,8 @@
-use crate::config::LauncherConfig;
-use crate::error::LauncherError;
-
-use super::fetch_manifest;
+use config::LauncherConfig;
+use domain::LauncherError;
 
 pub async fn cmd_search(config: &LauncherConfig, query: &str) -> Result<(), LauncherError> {
-    let manifest = fetch_manifest(config).await?;
+    let manifest = runtime::fetch_manifest(config).await?;
     let results = manifest.search(query);
 
     if results.is_empty() {

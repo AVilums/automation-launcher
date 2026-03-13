@@ -1,9 +1,7 @@
 use crate::cli::CacheAction;
-use crate::config::LauncherConfig;
-use crate::error::LauncherError;
-use crate::services::cache::CacheManager;
-
-use super::format_bytes;
+use config::LauncherConfig;
+use domain::{LauncherError, format_bytes};
+use storage::cache::CacheManager;
 
 pub fn cmd_cache(config: &LauncherConfig, action: CacheAction) -> Result<(), LauncherError> {
     let cache = CacheManager::new(config.cache_dir(), config.cache.max_size_mb);

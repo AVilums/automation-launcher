@@ -1,6 +1,6 @@
 use crate::cli::ConfigAction;
-use crate::config::LauncherConfig;
-use crate::error::LauncherError;
+use config::LauncherConfig;
+use domain::LauncherError;
 
 pub fn cmd_config(config: &LauncherConfig, action: ConfigAction) -> Result<(), LauncherError> {
     match action {

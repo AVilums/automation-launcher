@@ -4,6 +4,18 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+domain = { path = "../crates/domain" }
+artifact = { path = "../crates/artifact" }
+config = { path = "../crates/config" }
+network = { path = "../crates/network" }
+auth = { path = "../crates/auth" }
+storage = { path = "../crates/storage" }
+telemetry = { path = "../crates/telemetry" }
+provider = { path = "../crates/provider" }
+execution = { path = "../crates/execution" }
+runtime = { path = "../crates/runtime" }
+scheduler = { path = "../crates/scheduler" }
+
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }

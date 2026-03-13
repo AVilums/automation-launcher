@@ -1,0 +1,17 @@
+[package]
+name = "runtime"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+domain = { path = "../domain" }
+artifact = { path = "../artifact" }
+config = { path = "../config" }
+auth = { path = "../auth" }
+network = { path = "../network" }
+storage = { path = "../storage" }
+provider = { path = "../provider" }
+execution = { path = "../execution" }
+telemetry = { path = "../telemetry" }
+serde_json = { workspace = true }
+tracing = { workspace = true }

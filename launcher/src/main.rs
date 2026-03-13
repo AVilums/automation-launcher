@@ -1,22 +1,15 @@
-mod artifact;
 mod cli;
 mod commands;
-mod config;
-mod error;
 #[cfg(feature = "gui")]
 mod gui;
-mod providers;
-mod services;
-mod telemetry;
-mod util;
 
 use clap::Parser;
 use tracing::{error, info};
 
-use crate::cli::{Cli, Commands};
-use crate::config::LauncherConfig;
-use crate::error::LauncherError;
-use crate::telemetry::{EventType, TelemetryEvent, TelemetryManager, init_logging};
+use cli::{Cli, Commands};
+use config::LauncherConfig;
+use domain::LauncherError;
+use telemetry::{EventType, TelemetryEvent, TelemetryManager, init_logging};
 
 #[tokio::main]
 async fn main() {
@@ -83,7 +76,7 @@ async fn run(cli: Cli) -> Result<(), LauncherError> {
             commands::cmd_search(&config, &query).await?;
         }
         Some(Commands::Download { tool, version }) => {
-            commands::cmd_download(&config, &telemetry, &tool, version.as_deref()).await?;
+            runtime::cmd_download(&config, &telemetry, &tool, version.as_deref()).await?;
         }
         Some(Commands::Run {
             tool,
@@ -91,7 +84,7 @@ async fn run(cli: Cli) -> Result<(), LauncherError> {
             wait,
             args,
         }) => {
-            commands::cmd_run(&config, &telemetry, &tool, version.as_deref(), wait, &args).await?;
+            runtime::cmd_run(&config, &telemetry, &tool, version.as_deref(), wait, &args).await?;
         }
         Some(Commands::Cache { action }) => {
             commands::cmd_cache(&config, action)?;

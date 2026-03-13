@@ -1,4 +1,5 @@
 mod state;
+pub(crate) mod systems_data;
 mod tabs;
 
 use eframe::egui;
@@ -6,13 +7,15 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use crate::artifact::ArtifactManifest;
-use crate::commands;
-use crate::config::LauncherConfig;
-use crate::services::cache::{CacheEntry, CacheManager};
-use crate::services::favorites::Favorites;
+use artifact::ArtifactManifest;
+use config::LauncherConfig;
+use domain::LauncherError;
+use execution::ExecutionManager;
+use storage::cache::{CacheEntry, CacheManager};
+use storage::favorites::Favorites;
 
 use state::{BgMessage, SharedState};
+use systems_data::RunnerNode;
 use tabs::Tab;
 
 pub struct LauncherApp {
@@ -31,6 +34,10 @@ pub struct LauncherApp {
     pub(crate) settings_cache_mb: String,
     pub(crate) settings_telemetry: bool,
     pub(crate) settings_offline: bool,
+    pub(crate) runner_nodes: Vec<RunnerNode>,
+    pub(crate) selected_runner: Option<String>,
+    pub(crate) show_add_runner_dialog: bool,
+    pub(crate) add_runner_url: String,
 }
 
 impl LauncherApp {
@@ -62,6 +69,10 @@ impl LauncherApp {
             settings_cache_mb,
             settings_telemetry,
             settings_offline,
+            runner_nodes: Vec::new(),
+            selected_runner: None,
+            show_add_runner_dialog: false,
+            add_runner_url: String::new(),
         }
     }
 
@@ -90,7 +101,7 @@ impl LauncherApp {
         let config = self.config.clone();
 
         self.runtime.spawn(async move {
-            let result = commands::fetch_manifest(&config).await;
+            let result = runtime::fetch_manifest(&config).await;
             if let Ok(mut state) = shared.lock() {
                 match result {
                     Ok(manifest) => state.messages.push(BgMessage::ManifestLoaded(manifest)),
@@ -114,7 +125,7 @@ impl LauncherApp {
         let ver = version.to_string();
 
         self.runtime.spawn(async move {
-            let manifest = match commands::fetch_manifest(&config).await {
+            let manifest = match runtime::fetch_manifest(&config).await {
                 Ok(m) => m,
                 Err(e) => {
                     if let Ok(mut state) = shared.lock() {
@@ -127,17 +138,17 @@ impl LauncherApp {
             let result = match manifest.find_artifact(&name) {
                 Some(artifact) => match artifact.find_version(&ver) {
                     Some(av) => {
-                        commands::download::download_and_cache(
+                        runtime::download_and_cache(
                             &config, &name, &ver, &av.download_url, &av.sha256,
                         )
                         .await
                     }
-                    None => Err(crate::error::LauncherError::VersionNotFound {
+                    None => Err(LauncherError::VersionNotFound {
                         tool: name.clone(),
                         version: ver.clone(),
                     }),
                 },
-                None => Err(crate::error::LauncherError::ArtifactNotFound(name.clone())),
+                None => Err(LauncherError::ArtifactNotFound(name.clone())),
             };
 
             if let Ok(mut state) = shared.lock() {
@@ -156,7 +167,7 @@ impl LauncherApp {
         if let Some(cached_path) = cache.get_cached_path(tool_name, version) {
             let _ = cache.touch(tool_name, version);
 
-            let launch_config = match commands::run::build_launch_config(
+            let launch_config = match runtime::build_launch_config(
                 tool_name, version, &cached_path, &[],
             ) {
                 Ok(lc) => lc,
@@ -166,7 +177,7 @@ impl LauncherApp {
                 }
             };
 
-            let executable_path = match commands::run::resolve_executable(
+            let executable_path = match runtime::resolve_executable(
                 &cached_path, &launch_config, tool_name,
             ) {
                 Ok(p) => p,
@@ -176,7 +187,7 @@ impl LauncherApp {
                 }
             };
 
-            let exec = crate::services::execution::ExecutionManager::new();
+            let exec = ExecutionManager::new();
             match exec.execute(&executable_path, &launch_config) {
                 Ok(result) => {
                     let key = format!("{} v{}", tool_name, version);
@@ -280,6 +291,7 @@ impl eframe::App for LauncherApp {
                 ui.selectable_value(&mut self.current_tab, Tab::Browse, "📦 Browse");
                 ui.selectable_value(&mut self.current_tab, Tab::Favorites, "★ Favorites");
                 ui.selectable_value(&mut self.current_tab, Tab::Cache, "💾 Cache");
+                ui.selectable_value(&mut self.current_tab, Tab::Systems, "🖥 Systems");
                 ui.selectable_value(&mut self.current_tab, Tab::Settings, "⚙ Settings");
             });
         });
@@ -298,6 +310,7 @@ impl eframe::App for LauncherApp {
                 Tab::Browse => self.draw_browse_tab(ui),
                 Tab::Favorites => self.draw_favorites_tab(ui),
                 Tab::Cache => self.draw_cache_tab(ui),
+                Tab::Systems => self.draw_systems_tab(ui),
                 Tab::Settings => self.draw_settings_tab(ui),
             }
         });
