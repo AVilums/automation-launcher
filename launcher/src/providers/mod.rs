@@ -1,8 +1,20 @@
 #[allow(dead_code)]
 pub mod auth;
-mod provider;
+mod github;
+mod http;
+mod mock;
 
-pub use provider::{ArtifactProvider, GitHubProvider, HttpProvider};
+use crate::artifact::ArtifactManifest;
+use crate::error::LauncherError;
+
+pub use github::GitHubProvider;
+pub use http::HttpProvider;
 
 #[cfg(test)]
-pub use provider::MockProvider;
+pub use mock::MockProvider;
+
+pub trait ArtifactProvider: Send + Sync {
+    fn fetch_manifest(
+        &self,
+    ) -> impl std::future::Future<Output = Result<ArtifactManifest, LauncherError>> + Send;
+}

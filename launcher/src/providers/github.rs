@@ -4,46 +4,7 @@ use tracing::info;
 use crate::artifact::{Artifact, ArtifactManifest, ArtifactVersion, LaunchConfig};
 use crate::error::LauncherError;
 
-pub trait ArtifactProvider: Send + Sync {
-    fn fetch_manifest(
-        &self,
-    ) -> impl std::future::Future<Output = Result<ArtifactManifest, LauncherError>> + Send;
-}
-
-// ---------------------------------------------------------------------------
-// HTTP Provider — fetches manifest.json from a base URL
-// ---------------------------------------------------------------------------
-
-pub struct HttpProvider {
-    pub base_url: String,
-    client: reqwest::Client,
-}
-
-impl HttpProvider {
-    pub fn new(base_url: String) -> Self {
-        Self {
-            base_url,
-            client: reqwest::Client::new(),
-        }
-    }
-}
-
-impl ArtifactProvider for HttpProvider {
-    async fn fetch_manifest(&self) -> Result<ArtifactManifest, LauncherError> {
-        let url = format!("{}/manifest.json", self.base_url.trim_end_matches('/'));
-        info!("Fetching manifest from {}", url);
-        let response = self.client.get(&url).send().await?;
-        if !response.status().is_success() {
-            return Err(LauncherError::Provider(format!(
-                "HTTP {} from {}",
-                response.status(),
-                url
-            )));
-        }
-        let manifest: ArtifactManifest = response.json().await?;
-        Ok(manifest)
-    }
-}
+use super::ArtifactProvider;
 
 // ---------------------------------------------------------------------------
 // GitHub Releases Provider — discovers artifacts from GitHub Releases API
@@ -220,62 +181,4 @@ impl ArtifactProvider for GitHubProvider {
         info!("Building manifest from GitHub Releases API");
         self.manifest_from_releases().await
     }
-}
-
-// ---------------------------------------------------------------------------
-// Mock Provider — for testing
-// ---------------------------------------------------------------------------
-
-pub struct MockProvider {
-    manifest: ArtifactManifest,
-}
-
-impl MockProvider {
-    #[allow(dead_code)]
-    pub fn new(manifest: ArtifactManifest) -> Self {
-        Self { manifest }
-    }
-}
-
-impl ArtifactProvider for MockProvider {
-    async fn fetch_manifest(&self) -> Result<ArtifactManifest, LauncherError> {
-        Ok(self.manifest.clone())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn sample_manifest() -> ArtifactManifest {
-        ArtifactManifest {
-            artifacts: vec![Artifact {
-                name: "mock-tool".into(),
-                description: "A mock tool".into(),
-                tags: vec!["test".into()],
-                versions: vec![ArtifactVersion {
-                    version: "1.0.0".into(),
-                    download_url: "https://example.com/mock-tool-1.0.0.zip".into(),
-                    file_size: 256,
-                    sha256: "aabbcc".into(),
-                    launch: LaunchConfig {
-                        executable: "mock.exe".into(),
-                        args: None,
-                        env: None,
-                    },
-                }],
-            }],
-        }
-    }
-
-    #[tokio::test]
-    async fn test_mock_provider() {
-        let manifest = sample_manifest();
-        let provider = MockProvider::new(manifest.clone());
-
-        let fetched = provider.fetch_manifest().await.unwrap();
-        assert_eq!(fetched.artifacts.len(), 1);
-        assert_eq!(fetched.artifacts[0].name, "mock-tool");
-    }
-
 }

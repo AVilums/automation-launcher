@@ -1,49 +1,36 @@
+mod state;
+mod tabs;
+
 use eframe::egui;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use crate::artifact::{Artifact, ArtifactManifest};
+use crate::artifact::ArtifactManifest;
 use crate::commands;
 use crate::config::LauncherConfig;
 use crate::services::cache::{CacheEntry, CacheManager};
 use crate::services::favorites::Favorites;
-use crate::util::format_bytes;
 
-enum BgMessage {
-    ManifestLoaded(ArtifactManifest),
-    Error(String),
-    DownloadComplete(String, String),
-}
-
-struct SharedState {
-    messages: Vec<BgMessage>,
-}
-
-#[derive(PartialEq, Clone, Copy)]
-enum Tab {
-    Browse,
-    Favorites,
-    Cache,
-    Settings,
-}
+use state::{BgMessage, SharedState};
+use tabs::Tab;
 
 pub struct LauncherApp {
-    config: LauncherConfig,
-    manifest: Option<ArtifactManifest>,
-    cache_entries: Vec<CacheEntry>,
-    favorites: Favorites,
-    favorites_path: PathBuf,
-    search_query: String,
-    status_message: String,
+    pub(crate) config: LauncherConfig,
+    pub(crate) manifest: Option<ArtifactManifest>,
+    pub(crate) cache_entries: Vec<CacheEntry>,
+    pub(crate) favorites: Favorites,
+    pub(crate) favorites_path: PathBuf,
+    pub(crate) search_query: String,
+    pub(crate) status_message: String,
     current_tab: Tab,
     shared: Arc<Mutex<SharedState>>,
-    runtime: tokio::runtime::Handle,
-    loading: bool,
-    running_processes: HashMap<String, u32>,
-    settings_cache_mb: String,
-    settings_telemetry: bool,
-    settings_offline: bool,
+    pub(crate) runtime: tokio::runtime::Handle,
+    pub(crate) loading: bool,
+    pub(crate) running_processes: HashMap<String, u32>,
+    pub(crate) settings_cache_mb: String,
+    pub(crate) settings_telemetry: bool,
+    pub(crate) settings_offline: bool,
 }
 
 impl LauncherApp {
@@ -68,9 +55,7 @@ impl LauncherApp {
             search_query: String::new(),
             status_message: "Ready".into(),
             current_tab: Tab::Browse,
-            shared: Arc::new(Mutex::new(SharedState {
-                messages: Vec::new(),
-            })),
+            shared: SharedState::new(),
             runtime,
             loading: false,
             running_processes: HashMap::new(),
@@ -80,7 +65,7 @@ impl LauncherApp {
         }
     }
 
-    fn refresh_manifest(&mut self) {
+    pub(crate) fn refresh_manifest(&mut self) {
         if self.loading {
             return;
         }
@@ -115,7 +100,7 @@ impl LauncherApp {
         });
     }
 
-    fn trigger_download(&mut self, tool_name: &str, version: &str) {
+    pub(crate) fn trigger_download(&mut self, tool_name: &str, version: &str) {
         if self.loading {
             return;
         }
@@ -164,7 +149,7 @@ impl LauncherApp {
         });
     }
 
-    fn trigger_run(&mut self, tool_name: &str, version: &str) {
+    pub(crate) fn trigger_run(&mut self, tool_name: &str, version: &str) {
         let cache = CacheManager::new(self.config.cache_dir(), self.config.cache.max_size_mb);
         let _ = cache.init();
 
@@ -207,7 +192,7 @@ impl LauncherApp {
         }
     }
 
-    fn stop_process(&mut self, tool_name: &str, version: &str) {
+    pub(crate) fn stop_process(&mut self, tool_name: &str, version: &str) {
         let key = format!("{} v{}", tool_name, version);
         if let Some(pid) = self.running_processes.remove(&key) {
             #[cfg(windows)]
@@ -224,12 +209,12 @@ impl LauncherApp {
         }
     }
 
-    fn is_running(&self, tool_name: &str, version: &str) -> bool {
+    pub(crate) fn is_running(&self, tool_name: &str, version: &str) -> bool {
         let key = format!("{} v{}", tool_name, version);
         self.running_processes.contains_key(&key)
     }
 
-    fn refresh_cache(&mut self) {
+    pub(crate) fn refresh_cache(&mut self) {
         let cache = CacheManager::new(self.config.cache_dir(), self.config.cache.max_size_mb);
         let _ = cache.init();
         self.cache_entries = cache.list_entries().unwrap_or_default();
@@ -265,7 +250,7 @@ impl LauncherApp {
         }
     }
 
-    fn draw_run_stop_button(&mut self, ui: &mut egui::Ui, name: &str, version: &str) {
+    pub(crate) fn draw_run_stop_button(&mut self, ui: &mut egui::Ui, name: &str, version: &str) {
         if self.is_running(name, version) {
             if ui.button("⏹ Stop").clicked() {
                 let n = name.to_string();
@@ -277,243 +262,6 @@ impl LauncherApp {
                 let n = name.to_string();
                 let v = version.to_string();
                 self.trigger_run(&n, &v);
-            }
-        }
-    }
-
-    fn draw_browse_tab(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            ui.label("Search:");
-            ui.text_edit_singleline(&mut self.search_query);
-            if ui.button("🔄 Refresh").clicked() {
-                self.refresh_manifest();
-            }
-        });
-
-        ui.separator();
-
-        let artifacts: Vec<Artifact> = match &self.manifest {
-            Some(m) => {
-                if self.search_query.is_empty() {
-                    m.artifacts.clone()
-                } else {
-                    m.search(&self.search_query)
-                        .into_iter()
-                        .cloned()
-                        .collect()
-                }
-            }
-            None => Vec::new(),
-        };
-
-        if artifacts.is_empty() {
-            if self.manifest.is_none() {
-                ui.label("Click Refresh to load artifacts.");
-            } else {
-                ui.label("No artifacts found.");
-            }
-            return;
-        }
-
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            for artifact in &artifacts {
-                ui.group(|ui| {
-                    ui.horizontal(|ui| {
-                        ui.strong(&artifact.name);
-                        if let Some(v) = artifact.latest_version() {
-                            ui.label(format!("v{}", v.version));
-                        }
-                        if !artifact.tags.is_empty() {
-                            ui.label(format!("[{}]", artifact.tags.join(", ")));
-                        }
-                    });
-                    ui.label(&artifact.description);
-
-                    ui.horizontal(|ui| {
-                        if let Some(ver) = artifact.latest_version() {
-                            let is_cached = self.cache_entries.iter().any(|e| {
-                                e.tool_name == artifact.name && e.version == ver.version
-                            });
-
-                            if is_cached {
-                                self.draw_run_stop_button(ui, &artifact.name, &ver.version);
-                            } else if ui.button("⬇ Download").clicked() {
-                                let name = artifact.name.clone();
-                                let v = ver.version.clone();
-                                self.trigger_download(&name, &v);
-                            }
-                        }
-
-                        let is_fav = self.favorites.contains(&artifact.name);
-                        let fav_label = if is_fav { "★" } else { "☆" };
-                        if ui.button(fav_label).clicked() {
-                            if is_fav {
-                                self.favorites.remove(&artifact.name);
-                            } else {
-                                self.favorites.add(&artifact.name, None);
-                            }
-                            let _ = self.favorites.save(&self.favorites_path);
-                        }
-                    });
-                });
-            }
-        });
-    }
-
-    fn draw_favorites_tab(&mut self, ui: &mut egui::Ui) {
-        if self.favorites.items.is_empty() {
-            ui.label("No favorites yet. Star tools in the Browse tab.");
-            return;
-        }
-
-        let fav_names: Vec<String> = self
-            .favorites
-            .items
-            .iter()
-            .map(|f| f.tool_name.clone())
-            .collect();
-
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            for name in &fav_names {
-                ui.group(|ui| {
-                    ui.horizontal(|ui| {
-                        ui.strong(name);
-
-                        let cached = self
-                            .cache_entries
-                            .iter()
-                            .find(|e| &e.tool_name == name);
-
-                        if let Some(entry) = cached {
-                            let ver = entry.version.clone();
-                            ui.label(format!("v{} (cached)", ver));
-                            self.draw_run_stop_button(ui, name, &ver);
-                        } else {
-                            ui.label("not cached");
-                        }
-
-                        if ui.button("★ Remove").clicked() {
-                            self.favorites.remove(name);
-                            let _ = self.favorites.save(&self.favorites_path);
-                        }
-                    });
-                });
-            }
-        });
-    }
-
-    fn draw_cache_tab(&mut self, ui: &mut egui::Ui) {
-        if ui.button("🔄 Refresh").clicked() {
-            self.refresh_cache();
-        }
-
-        let total: u64 = self.cache_entries.iter().map(|e| e.size_bytes).sum();
-        let limit = self.config.cache.max_size_mb * 1024 * 1024;
-        ui.label(format!(
-            "Entries: {}  |  Used: {}  |  Limit: {}",
-            self.cache_entries.len(),
-            format_bytes(total),
-            format_bytes(limit)
-        ));
-
-        ui.separator();
-
-        if self.cache_entries.is_empty() {
-            ui.label("Cache is empty.");
-            return;
-        }
-
-        let mut to_remove: Option<(String, String)> = None;
-        let mut to_run: Option<(String, String)> = None;
-        let mut to_stop: Option<(String, String)> = None;
-
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            for entry in &self.cache_entries {
-                ui.horizontal(|ui| {
-                    ui.label(format!(
-                        "{} v{} — {} — {}",
-                        entry.tool_name,
-                        entry.version,
-                        format_bytes(entry.size_bytes),
-                        entry.last_used.format("%Y-%m-%d %H:%M")
-                    ));
-                    if ui.button("🗑").clicked() {
-                        to_remove = Some((entry.tool_name.clone(), entry.version.clone()));
-                    }
-                    if self.is_running(&entry.tool_name, &entry.version) {
-                        if ui.button("⏹ Stop").clicked() {
-                            to_stop = Some((entry.tool_name.clone(), entry.version.clone()));
-                        }
-                    } else if ui.button("▶ Run").clicked() {
-                        to_run = Some((entry.tool_name.clone(), entry.version.clone()));
-                    }
-                });
-            }
-        });
-
-        if let Some((name, version)) = to_stop {
-            self.stop_process(&name, &version);
-        }
-
-        if let Some((name, version)) = to_run {
-            self.trigger_run(&name, &version);
-        }
-
-        if let Some((name, version)) = to_remove {
-            let cache =
-                CacheManager::new(self.config.cache_dir(), self.config.cache.max_size_mb);
-            let _ = cache.remove(&name, &version);
-            self.refresh_cache();
-            self.status_message = format!("Removed {} v{}", name, version);
-        }
-    }
-
-    fn draw_settings_tab(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Settings");
-        ui.separator();
-
-        ui.horizontal(|ui| {
-            ui.label("Cache size (MB):");
-            ui.text_edit_singleline(&mut self.settings_cache_mb);
-        });
-
-        ui.checkbox(&mut self.settings_telemetry, "Enable telemetry");
-        ui.checkbox(&mut self.settings_offline, "Offline mode");
-
-        ui.separator();
-
-        ui.label(format!(
-            "Config file: {}",
-            self.config.base_dir.join("config").join("launcher.json").display()
-        ));
-        ui.label(format!("Provider: {:?}", self.config.provider));
-        ui.label(format!("Auth: {:?}", self.config.auth));
-
-        ui.separator();
-
-        if ui.button("💾 Save Settings").clicked() {
-            if let Ok(mb) = self.settings_cache_mb.parse::<u64>() {
-                self.config.cache.max_size_mb = mb;
-            }
-            self.config.telemetry.enabled = self.settings_telemetry;
-            self.config.offline_mode = self.settings_offline;
-
-            match self.config.save() {
-                Ok(()) => self.status_message = "Settings saved".into(),
-                Err(e) => self.status_message = format!("Failed to save: {}", e),
-            }
-        }
-
-        if ui.button("🔄 Reset to Defaults").clicked() {
-            match LauncherConfig::load() {
-                Ok(c) => {
-                    self.config = c;
-                    self.settings_cache_mb = self.config.cache.max_size_mb.to_string();
-                    self.settings_telemetry = self.config.telemetry.enabled;
-                    self.settings_offline = self.config.offline_mode;
-                    self.status_message = "Settings reset".into();
-                }
-                Err(e) => self.status_message = format!("Reset failed: {}", e),
             }
         }
     }

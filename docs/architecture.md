@@ -52,10 +52,24 @@ automation-launcher/
 
 - `config` - Configuration management
 - `artifact` - Artifact model and manifest
-- `provider` - Artifact provider abstraction (HTTP, GitHub, Mock)
-- `download` - Download management with retry and checksum verification
-- `cache` - Local artifact caching with LRU eviction
-- `execution` - Process execution for .exe, .ps1, .bat formats
+- `providers/` - Artifact provider abstraction
+  - `http` - HTTP manifest provider
+  - `github` - GitHub Releases provider
+  - `mock` - Mock provider for testing
+  - `auth/` - Authentication strategies
+    - `no_auth` - No authentication
+    - `api_key` - API key authentication
+    - `jwt` - JWT token authentication
+    - `oauth_device` - OAuth Device Flow authentication
+- `services/`
+  - `download` - Download management with retry and checksum verification
+  - `cache` - Local artifact caching with LRU eviction
+  - `execution` - Process execution for .exe, .ps1, .bat formats
+  - `extract` - Archive extraction
+  - `favorites` - Favorites management
+- `gui/` - Graphical user interface (feature-gated)
+  - `state` - Shared state and background messaging
+  - `tabs/` - Tab-based UI panels (browse, favorites, cache, settings)
 - `telemetry` - Structured telemetry event logging
-- `logging` - Application logging setup
+- `commands` - CLI command handlers
 - `error` - Structured error types
