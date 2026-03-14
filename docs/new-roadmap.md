@@ -1,5 +1,3 @@
----
-
 ### 1. Workspace Architecture
 
 The platform evolves from the current two-executable monolith (`bootstrap/`, `launcher/`) into a modular Rust workspace with three executables and eleven shared crates.

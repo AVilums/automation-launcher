@@ -2168,7 +2168,6 @@ dependencies = [
  "artifact",
  "auth",
  "chrono",
- "clap",
  "config",
  "dirs",
  "domain",

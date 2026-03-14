@@ -29,7 +29,6 @@ chrono = { workspace = true }
 uuid = { workspace = true }
 dirs = { workspace = true }
 futures-util = { workspace = true }
-clap = { workspace = true }
 zip = { workspace = true }
 
 [features]
